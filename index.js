@@ -3,10 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
-// Load configuration
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
 
-// Setup SQLite database for token rotation
 const db = new sqlite3.Database(path.join(__dirname, 'tokens.db'));
 
 db.serialize(() => {
@@ -39,28 +37,16 @@ function updateTokenUsage(tokens) {
   });
 }
 
-// Moscow timezone offset (UTC+3)
 const MSK_OFFSET = 3 * 60 * 60 * 1000;
 
-// Flag to prevent duplicate likes on reset
 let resetLikeInProgress = false;
 
-// Store active clients for burst actions
 let activeClients = [];
-
-/**
- * Get current time in Moscow timezone
- */
 function getMoscowTime() {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
   return new Date(utc + MSK_OFFSET);
 }
-
-/**
- * Precise wait function to wait until a specific local timestamp in milliseconds.
- * Uses standard setTimeout for the bulk of the delay, and a high-precision spin loop for the final 10ms.
- */
 async function preciseWait(targetTimeMs, pingOffsetMs = 0) {
   const effectiveTarget = targetTimeMs - pingOffsetMs;
 
@@ -71,15 +57,9 @@ async function preciseWait(targetTimeMs, pingOffsetMs = 0) {
     await new Promise(resolve => setTimeout(resolve, remaining - 10));
   }
 
-  // Spin lock for the last 10ms to achieve millisecond-level precision
   while (Date.now() < effectiveTarget) {
-    // busy wait
   }
 }
-
-/**
- * Dynamically calculate REST API ping to compensate for network latency.
- */
 async function calculateDynamicPing(client) {
   try {
     let total = 0;
@@ -99,16 +79,11 @@ async function calculateDynamicPing(client) {
   }
 }
 
-// Scheduled like dates (1st and 15th of each month at 3:00:00.010 AM MSK)
 const SCHEDULED_DAYS = [1, 15];
 const SCHEDULED_HOUR = 3;
 const SCHEDULED_MINUTE = 0;
 const SCHEDULED_SECOND = 0;
 const SCHEDULED_MS = 10;
-
-/**
- * Check if a timestamp falls on a scheduled like day (1st or 15th) before 3:00 AM MSK
- */
 function checkIfScheduledLikeDay(timestamp) {
   const targetDate = new Date(timestamp * 1000);
   const utc = targetDate.getTime() + (targetDate.getTimezoneOffset() * 60000);
@@ -135,10 +110,6 @@ function checkIfScheduledLikeDay(timestamp) {
 
   return null;
 }
-
-/**
- * Extract next like timestamp from /remaining embed
- */
 function extractTimestamp(embed) {
   const title = embed?.title || '';
   const description = embed?.description || '';
@@ -160,39 +131,23 @@ function extractTimestamp(embed) {
 
   return undefined;
 }
-
-/**
- * Check if embed indicates likes reset
- */
 function isLikesReset(embed) {
   const title = embed.title || '';
   const description = embed.description || '';
   return title.includes('Произошел сброс лайков') || description.includes('Произошел сброс лайков');
 }
-
-/**
- * Check if embed indicates successful like
- */
 function isLikeSuccess(embed) {
   const title = embed.title || '';
   const description = embed.description || '';
   const content = title + '\n' + description;
   return /(успешно лайкнули|успешно лайкнуто|successfully liked)/i.test(content);
 }
-
-/**
- * Check if embed indicates a cooldown
- */
 function isCooldown(embed) {
   const title = embed?.title || '';
   const description = embed?.description || '';
   const content = title + '\n' + description;
   return /(не так быстро|not so fast|до следующего лайка|cooldown)/i.test(content);
 }
-
-/**
- * Parse cooldown string like "3 часа 10 минут" into milliseconds
- */
 function parseCooldownMs(embed) {
   const title = embed?.title || '';
   const description = embed?.description || '';
@@ -209,11 +164,6 @@ function parseCooldownMs(embed) {
   
   return totalMs;
 }
-
-/**
- * Execute /like command with an infinite loop of 30-second retries until success
- * Handles multiple clients simultaneously (burst)
- */
 async function executeLikeCommandUntilSuccess(clients, logPrefix = '[LIKE]', allowCooldownReturn = false) {
   const channelId = config.channelId;
   let success = false;
@@ -249,7 +199,7 @@ async function executeLikeCommandUntilSuccess(clients, logPrefix = '[LIKE]', all
           for (const field of fields) {
             console.log(`${logPrefix} ${field.name}: ${field.value}`);
           }
-          break; // Stop checking other results if one succeeded
+          break;
         } else if (isCooldown(likeEmbed)) {
           const cooldownMs = parseCooldownMs(likeEmbed);
           if (cooldownMs > 0 && cooldownMs < minCooldown) {
@@ -281,10 +231,6 @@ async function executeLikeCommandUntilSuccess(clients, logPrefix = '[LIKE]', all
     }
   }
 }
-
-/**
- * Send a slash command and wait for response
- */
 async function sendSlashCommand(client, channelId, botId, commandId, versionId, commandName) {
   try {
     const channel = client.channels.cache.get(channelId) || await client.channels.fetch(channelId);
@@ -300,10 +246,6 @@ async function sendSlashCommand(client, channelId, botId, commandId, versionId, 
     throw error;
   }
 }
-
-/**
- * Handle likes reset - send /like immediately, then /remaining
- */
 async function handleLikesReset() {
   if (resetLikeInProgress) {
     console.log('[RESET] Reset like already in progress, skipping...');
@@ -318,12 +260,10 @@ async function handleLikesReset() {
     console.log('[RESET DETECTED] Likes have been reset! Sending /like immediately...');
     console.log(`[RESET] Moscow time: ${getMoscowTime().toLocaleString('ru-RU')}`);
 
-    // Execute /like command with 30s retry until success using all active clients
     await executeLikeCommandUntilSuccess(activeClients, '[RESET SUCCESS]', false);
 
     console.log('[RESET] Now checking /remaining for next like time...');
 
-    // Send /remaining to get next like time using the first client
     const remainingResponse = await sendSlashCommand(
       activeClients[0],
       channelId,
@@ -355,18 +295,10 @@ async function handleLikesReset() {
     resetLikeInProgress = false;
   }
 }
-
-/**
- * Check if message is a like reminder (role ping with /like)
- */
 function isLikeReminder(message) {
   const content = message.content || '';
   return content.includes('<@&') && content.includes('`/like`');
 }
-
-/**
- * Handle like reminder - send /like immediately, then /remaining
- */
 async function handleLikeReminder() {
   if (resetLikeInProgress) {
     console.log('[REMINDER] Like already in progress, skipping...');
@@ -381,12 +313,10 @@ async function handleLikeReminder() {
     console.log('[REMINDER DETECTED] Like reminder received! Sending /like immediately...');
     console.log(`[REMINDER] Moscow time: ${getMoscowTime().toLocaleString('ru-RU')}`);
 
-    // Execute /like command with 30s retry until success
     await executeLikeCommandUntilSuccess(activeClients, '[REMINDER SUCCESS]', false);
 
     console.log('[REMINDER] Now checking /remaining for next like time...');
 
-    // Send /remaining to get next like time
     const remainingResponse = await sendSlashCommand(
       activeClients[0],
       channelId,
@@ -418,16 +348,10 @@ async function handleLikeReminder() {
     resetLikeInProgress = false;
   }
 }
-
-/**
- * Setup message listener for likes reset and reminder detection
- */
 function setupResetListener(client) {
   client.on('messageCreate', async (message) => {
-    // Only listen to the configured channel
     if (message.channel.id !== config.channelId) return;
 
-    // Check for like reminder message (role ping + /like)
     if (isLikeReminder(message)) {
       console.log('[LISTENER] Detected like reminder message in channel!');
       console.log(`[LISTENER] Message content: ${message.content}`);
@@ -435,7 +359,6 @@ function setupResetListener(client) {
       return;
     }
 
-    // Check embeds for likes reset
     if (message.embeds && message.embeds.length > 0) {
       for (const embed of message.embeds) {
         if (isLikesReset(embed)) {
@@ -449,10 +372,6 @@ function setupResetListener(client) {
 
   console.log(`[LISTENER] Reset and reminder listener active for channel ${config.channelId}`);
 }
-
-/**
- * Perform one like cycle using multiple clients
- */
 async function performLikeCycle(clients) {
   if (!clients || clients.length === 0) throw new Error('No active clients provided to performLikeCycle');
   const channelId = config.channelId;
@@ -460,7 +379,6 @@ async function performLikeCycle(clients) {
   try {
     console.log(`[${new Date().toLocaleString()}] Checking remaining time...`);
 
-    // Send /remaining command to check time using the first client
     const remainingResponse = await sendSlashCommand(
       clients[0],
       channelId,
@@ -487,7 +405,6 @@ async function performLikeCycle(clients) {
     }
 
     if (targetTimestamp === null) {
-      // "Пора!" - need to send /like immediately
       console.log('[ACTION] Time is ready! Sending /like command now...');
 
       const likeAction = await executeLikeCommandUntilSuccess(clients, '[SUCCESS]', true);
@@ -502,7 +419,6 @@ async function performLikeCycle(clients) {
         return { status: 'wait', waitTime: waitTime };
       }
 
-      // Verify command success
       let verified = false;
       while (!verified) {
         console.log('[VERIFY] Checking if /like was successful...');
@@ -582,7 +498,6 @@ async function performLikeCycle(clients) {
         }
       }
     } else {
-      // Got timestamp - check if falls on scheduled day
       const scheduledCheck = checkIfScheduledLikeDay(targetTimestamp);
 
       let targetTimeMs;
@@ -633,7 +548,6 @@ async function performLikeCycle(clients) {
         return { status: 'wait', waitTime: waitTime };
       }
 
-      // Verify command success
       let verified = false;
       while (!verified) {
         console.log('[VERIFY] Checking if /like was successful...');
@@ -685,10 +599,6 @@ async function performLikeCycle(clients) {
     throw error;
   }
 }
-
-/**
- * Create and login a client with a specific token
- */
 async function createAndLoginClient(token) {
   const client = new Client({
     checkUpdate: false,
@@ -714,20 +624,17 @@ async function createAndLoginClient(token) {
     setTimeout(() => reject(new Error('Login timeout')), 30000);
   });
 
-  // Setup reset listener for this client
   setupResetListener(client);
 
   return client;
 }
 
-// Main execution
 (async () => {
   try {
     process.on('unhandledRejection', (error) => {
       console.error('[UNHANDLED REJECTION]', error.message);
     });
 
-    // Main loop
     while (true) {
       activeClients = [];
 
@@ -748,7 +655,6 @@ async function createAndLoginClient(token) {
 
         const result = await performLikeCycle(activeClients);
 
-        // Update token usage in DB because we completed a cycle
         await updateTokenUsage(tokensToUse);
 
         if (result && result.status === 'success') {
@@ -758,14 +664,12 @@ async function createAndLoginClient(token) {
           const waitTime = result.waitTime;
           console.log(`[CYCLE] Need to wait for ${Math.floor(waitTime / 1000)} seconds before next cycle`);
 
-          // Disconnect clients now
           for (const c of activeClients) {
             try { await c.destroy(); } catch (e) {}
           }
           activeClients = [];
           console.log('[CLEANUP] Clients disconnected for waiting period');
 
-          // Wait in main loop minus safety margin of 20 seconds
           const sleepTime = waitTime - 20000;
           if (sleepTime > 0) {
             console.log(`[SLEEP] Sleeping for ${Math.floor(sleepTime / 1000)} seconds...`);
