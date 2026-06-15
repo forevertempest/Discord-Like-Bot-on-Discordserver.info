@@ -138,8 +138,8 @@ Edit the `config.json` file in the root directory:
 ```json
 {
   "tokens": [
-    "YOUR_TOKEN_1",
-    "YOUR_TOKEN_2"
+    "TOKEN_1",
+    "TOKEN_2"
   ],
   "pingOffsetMs": 100,
   "burstCount": 1,
