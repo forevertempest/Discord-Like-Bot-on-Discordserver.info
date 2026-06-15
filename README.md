@@ -41,8 +41,8 @@ npm install
 ```json
 {
   "tokens": [
-    "ВАШ_ТОКЕН_1",
-    "ВАШ_ТОКЕН_2"
+    "ТОКЕН_1",
+    "ТОКЕН_2"
   ],
   "pingOffsetMs": 100,
   "burstCount": 1,
